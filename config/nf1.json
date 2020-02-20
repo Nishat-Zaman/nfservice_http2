@@ -1,0 +1,9 @@
+{
+    
+    "remotenfapiroot": "https://localhost:8090/nf2",
+    "localapirootprefix": "https://localhost",
+    "HTTPConfig": {
+        "apiendpoint": ":8060",
+        "nfendpoint": ":8070"
+    }
+}
