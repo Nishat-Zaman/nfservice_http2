@@ -23,6 +23,7 @@ import (
 )
 
 var httpVersion = flag.Int("version", 2, "HTTP version")
+var ver string
 
 // Config contains NF Module Configuration Data Structure
 type Config struct {
@@ -44,6 +45,16 @@ var cfg Config
 func main() {
 
 	// Read the configuration
+	flag.Parse()
+	switch *httpVersion {
+	case 2:
+		ver = "https"
+	case 1:
+		ver = "http"
+	default:
+		log.Print("wrong http version selected")
+		return
+	}
 	err := loadJSONConfig(cfgPath, &cfg)
 	if err != nil {
 		log.Printf("Failed to load NF configuration: %v", err)
@@ -82,8 +93,8 @@ func loadJSONConfig(configPath string, cfg *Config) error {
 
 	// Check if configuration is valid
 	if cfg.NFEndpoint == "" {
-		log.Print("NF HTTP2 Server endpoint  not configured")
-		return errors.New("NF HTTP2 Server endpoint  not configured")
+		log.Print("NF " + ver + " Server endpoint  not configured")
+		return errors.New("NF " + ver + " Server endpoint  not configured")
 	}
 
 	return err
@@ -93,7 +104,7 @@ func printConfig(cfg *Config) {
 
 	log.Printf("********************* NF CONFIGURATION ******************")
 	log.Printf("NF2 End Point: %v", cfg.NFEndpoint)
-	log.Printf("NF2 Lcoal API Root Prefix: %v", cfg.LocalNfAPIRoot)
+	log.Printf("NF2 Lcoal API Root Prefix: %v", ver+cfg.LocalNfAPIRoot)
 	log.Printf("*************************************************************")
 
 }
@@ -108,11 +119,13 @@ func RunServer(ctx context.Context, cfg *Config) error {
 		WriteTimeout:   30 * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
-	err := http2.ConfigureServer(nfserver, &http2.Server{})
-	if err != nil {
-		log.Print("failed at configuring HTTP2 server")
-	}
+	if *httpVersion == 2 {
 
+		err := http2.ConfigureServer(nfserver, &http2.Server{})
+		if err != nil {
+			log.Print("failed at configuring HTTP2 server")
+		}
+	}
 	http.HandleFunc("/nf2", handlerWithCtx)
 
 	stopServerCh := make(chan bool, 2)
@@ -122,14 +135,15 @@ func RunServer(ctx context.Context, cfg *Config) error {
 	go func(stopServerCh chan bool) {
 		<-ctx.Done()
 
-		log.Print("Executing graceful stop for NF HTTP2 Server")
+		log.Print("Executing graceful stop for NF " + ver + " Server")
 		if err := nfserver.Close(); err != nil {
-			log.Printf("Could not close NF HTTP2 server: %#v", err)
+			log.Printf("Could not close NF "+ver+" server: %#v", err)
 		}
-		log.Printf("NF HTTP2 server stopped")
+		log.Printf("NF " + ver + " server stopped")
 		stopServerCh <- true
 	}(stopServerCh)
 	/* Go Routine is spawned here for starting NF HTTP Server */
+
 	go startHTTPServer(nfserver, stopServerCh, "NF2")
 
 	<-stopServerCh
@@ -141,13 +155,19 @@ func RunServer(ctx context.Context, cfg *Config) error {
 func startHTTPServer(server *http.Server,
 	stopServerCh chan bool, name string) {
 	if server != nil {
-		log.Printf("%s HTTP2 listening on %s", name, server.Addr)
-		if err := server.ListenAndServeTLS("certs/server-cert.pem", "certs/server-key.pem"); err != nil {
-			log.Printf("HTTP2 server error: " + err.Error())
+		log.Printf("%s "+ver+" listening on %s", name, server.Addr)
+		switch *httpVersion {
+		case 1:
+			if err := server.ListenAndServe(); err != nil {
+				log.Printf(ver + " server error: " + err.Error())
+			}
+		case 2:
+			if err := server.ListenAndServeTLS("certs/server-cert.pem", "certs/server-key.pem"); err != nil {
+				log.Printf(ver + " server error: " + err.Error())
+			}
 		}
-		/* if err := server.ListenAndServe(); err != nil {
-			log.Printf("HTTP server error: " + err.Error())
-		} */
+		/*
+			} */
 	}
 	stopServerCh <- true
 }
@@ -197,13 +217,20 @@ func handlerWithCtx(w http.ResponseWriter, r *http.Request) {
 			RootCAs: caCertPool,
 		}
 
-		client.Transport = &http2.Transport{
-			TLSClientConfig: tlsConfig,
+		switch *httpVersion {
+		case 1:
+			client.Transport = &http.Transport{
+				TLSClientConfig: tlsConfig,
+			}
+		case 2:
+			client.Transport = &http2.Transport{
+				TLSClientConfig: tlsConfig,
+			}
 		}
 
 		nf1location := nf1Body.Location
 
-		nf1Body.Location = cfg.LocalNfAPIRoot + cfg.NFEndpoint +
+		nf1Body.Location = ver + cfg.LocalNfAPIRoot + cfg.NFEndpoint +
 			"/nf2"
 		nf1Body.Time = time.Now().String()
 
