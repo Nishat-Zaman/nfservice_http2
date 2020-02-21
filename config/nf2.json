@@ -1,4 +1,4 @@
 {
     "nfendpoint": ":8090",
-    "localapirootprefix": "https://localhost"
+    "localapirootprefix": "://localhost"
 }
